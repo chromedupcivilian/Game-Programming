@@ -1,4 +1,5 @@
 using UnityEngine;
+using TMPro; // Required for TextMeshPro
 
 // Ensure the GameObject has a Rigidbody component
 [RequireComponent(typeof(Rigidbody))]
@@ -7,17 +8,28 @@ public class NewtonianPhysicsDemo : MonoBehaviour
     [Header("Physics Settings")]
     [Tooltip("The magnitude of the force applied with arrow keys.")]
     public float pushForce = 10f;
-
     [Tooltip("The magnitude of the upward force for jumping.")]
     public float jumpForce = 7f;
-
     [Tooltip("How the force is applied (Force accelerates over time, Impulse applies instantly).")]
-    public ForceMode forceMode = ForceMode.Force; // Change to Impulse for sudden pushes
+    public ForceMode forceMode = ForceMode.Force;
+
+    [Header("UI Display")]
+    [Tooltip("The TextMeshPro UI element to display the current law.")]
+    public TextMeshProUGUI lawDisplayText; // Assign this in the Inspector!
 
     // Reference to the Rigidbody component
     private Rigidbody rb;
     private Vector3 initialPosition;
     private Quaternion initialRotation;
+
+    // State tracking for UI text
+    private bool justCollided = false;
+    private float collisionDisplayTime = 1.5f; // How long to show collision text
+    private float collisionTimer = 0f;
+    private bool isApplyingInputForce = false; // Track if input force is active this frame
+
+    // Threshold to consider the object 'at rest'
+    private const float velocityRestThreshold = 0.1f;
 
     void Awake()
     {
@@ -31,6 +43,13 @@ public class NewtonianPhysicsDemo : MonoBehaviour
             return;
         }
 
+        // Check if the UI text element is assigned
+        if (lawDisplayText == null)
+        {
+            Debug.LogError("Law Display Text (TextMeshProUGUI) not assigned in the Inspector!", this);
+            // Don't disable the whole script, just the UI part won't work
+        }
+
         // Store initial state for reset
         initialPosition = transform.position;
         initialRotation = transform.rotation;
@@ -38,108 +57,129 @@ public class NewtonianPhysicsDemo : MonoBehaviour
         Debug.Log("--- Newtonian Physics Demo ---");
         Debug.Log("1st Law (Inertia): Object at rest. Press arrow keys or Space to apply force.");
         Debug.Log("Rigidbody Mass: " + rb.mass); // Relevant for 2nd Law
+
+        UpdateLawText(); // Set initial text
     }
 
     void Update()
     {
-        // --- Input Handling (Detecting the intent to apply force) ---
-        // We apply the actual force in FixedUpdate for physics consistency.
-
+        // --- Input Handling ---
         // Reset position and velocity
         if (Input.GetKeyDown(KeyCode.R))
         {
             ResetObject();
         }
 
-        // Jump Input (Applies force upwards)
+        // Jump Input
         if (Input.GetKeyDown(KeyCode.Space))
         {
-            ApplyJumpForce(); // We'll call the Rigidbody method in FixedUpdate via a flag or direct call if needed, but simple jump is okay here for demo
-             Debug.Log("Input: Space pressed - Attempting Jump (See FixedUpdate for actual force).");
+            ApplyJumpForce();
+            // Force UI update for jump action (2nd Law)
+            if (lawDisplayText != null)
+            {
+                 lawDisplayText.text = "Newton's 2nd Law: Applying jump force (F=ma)";
+                 // Reset collision timer if jump interrupts it
+                 collisionTimer = 0f;
+                 justCollided = false;
+            }
         }
 
-        // Movement Input (Handled in FixedUpdate)
-        HandleMovementInput();
+        // Check movement input status for FixedUpdate
+        float horizontalInput = Input.GetAxis("Horizontal");
+        float verticalInput = Input.GetAxis("Vertical");
+        isApplyingInputForce = Mathf.Abs(horizontalInput) > 0.01f || Mathf.Abs(verticalInput) > 0.01f;
+
+        // --- Collision Text Timer ---
+        if (justCollided)
+        {
+            collisionTimer -= Time.deltaTime;
+            if (collisionTimer <= 0)
+            {
+                justCollided = false;
+                // Force UI update after collision message expires
+                UpdateLawText();
+            }
+        }
     }
 
     void FixedUpdate()
     {
         // --- Physics Calculations and Force Application ---
-        // FixedUpdate runs at a fixed interval, making it ideal for physics.
-
-        // --- 1st Law (Inertia) Demonstration ---
-        // If no external forces are being applied via input below, and the object
-        // is resting or moving, it will continue in that state due to inertia.
-        // Gravity is acting, but if resting on the plane, the normal force balances it.
-        // We log velocity to observe its state.
-        // Debug.Log($"FixedUpdate - Velocity: {rb.velocity.magnitude:F2} m/s"); // Can be spammy
-
-        // --- 2nd Law (F=ma) Demonstration ---
-        // Apply forces based on input detected in Update.
-        // The Rigidbody's mass influences the resulting acceleration.
-        float horizontalInput = Input.GetAxis("Horizontal"); // A/D or Left/Right
-        float verticalInput = Input.GetAxis("Vertical");     // W/S or Up/Down
-
-        if (Mathf.Abs(horizontalInput) > 0.01f || Mathf.Abs(verticalInput) > 0.01f)
+        if (isApplyingInputForce)
         {
+            float horizontalInput = Input.GetAxis("Horizontal"); // Read again for FixedUpdate timing
+            float verticalInput = Input.GetAxis("Vertical");
             Vector3 movementDirection = new Vector3(horizontalInput, 0f, verticalInput).normalized;
             Vector3 forceToApply = movementDirection * pushForce;
-
             rb.AddForce(forceToApply, forceMode);
-
-            // Log the force being applied (demonstrates applying force)
-            // Debug.Log($"Applying Force: {forceToApply} (Mode: {forceMode})");
         }
 
-        // Log velocity change resulting from force (demonstrates acceleration)
-        // You'll see velocity change when forces are applied.
+        // --- Update UI Text (if not showing collision message) ---
+        if (!justCollided)
+        {
+            UpdateLawText();
+        }
     }
 
     // --- 3rd Law (Action-Reaction) Demonstration ---
     void OnCollisionEnter(Collision collision)
     {
-        // This function is called by Unity when this collider/rigidbody
-        // starts touching another rigidbody/collider.
         Debug.Log($"--- Collision! (3rd Law) ---");
         Debug.Log($"Action: {gameObject.name} collided with {collision.gameObject.name}.");
+        ContactPoint contact = collision.contacts[0];
+        Debug.Log($"Reaction: Opposing force applied at {contact.point}. Impulse: {collision.impulse.magnitude:F2}");
 
-        // The physics engine automatically applies the reaction force.
-        // If 'collision.gameObject' also has a Rigidbody, it will react to the collision.
-        // If it's a static collider (like the default plane/wall), it provides resistance.
-        ContactPoint contact = collision.contacts[0]; // Get the first contact point
-        Debug.Log($"Reaction: An opposing force is applied at the contact point ({contact.point}). Magnitude depends on impact.");
-
-        // You can get the impulse (force * time) of the collision
-        Debug.Log($"Collision Impulse Magnitude: {collision.impulse.magnitude:F2}");
+        if (lawDisplayText != null)
+        {
+            lawDisplayText.text = "Newton's 3rd Law: Collision (Action-Reaction!)";
+            justCollided = true;
+            collisionTimer = collisionDisplayTime; // Start timer to show message
+        }
     }
 
     // --- Helper Methods ---
 
-    void HandleMovementInput()
-    {
-         // In this setup, we read input in Update but apply force in FixedUpdate
-         // based on the current axis values. This is a common pattern.
-         // No extra code needed here as FixedUpdate reads Input.GetAxis directly.
-    }
-
     void ApplyJumpForce()
     {
-        // It's generally best practice to apply forces in FixedUpdate.
-        // For a simple jump triggered by GetKeyDown, applying it directly here
-        // or in FixedUpdate is often acceptable, though FixedUpdate is technically purer.
-        // Let's apply it directly for simplicity in this demo.
-         rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse); // Impulse for sudden jump
-         Debug.Log($"Action (2nd Law): Applied Jump Force: {Vector3.up * jumpForce} (Mode: Impulse)");
+        rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+        Debug.Log($"Action (2nd Law): Applied Jump Force: {Vector3.up * jumpForce} (Mode: Impulse)");
+        // UI text updated in Update() where jump is detected
     }
-
 
     void ResetObject()
     {
-        rb.velocity = Vector3.zero;         // Stop current motion
-        rb.angularVelocity = Vector3.zero;  // Stop current rotation
-        transform.position = initialPosition; // Reset position
-        transform.rotation = initialRotation; // Reset rotation
+        rb.velocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+        transform.position = initialPosition;
+        transform.rotation = initialRotation;
+        justCollided = false; // Clear collision state
+        collisionTimer = 0f;
+        isApplyingInputForce = false; // Reset input state
         Debug.Log("--- Object Reset ---");
-        Debug.Log("1st Law (Inertia): Object at rest. Press arrow keys or Space to apply force.");
+        UpdateLawText(); // Update text to resting state
+    }
+
+    // Central method to update the law text based on current state
+    void UpdateLawText()
+    {
+        if (lawDisplayText == null || justCollided) // Don't update if null or showing collision
+        {
+            return;
+        }
+
+        bool isMoving = rb.velocity.magnitude > velocityRestThreshold;
+
+        if (isApplyingInputForce) // Check the flag set in Update
+        {
+            lawDisplayText.text = "Newton's 2nd Law: Applying force (F=ma)";
+        }
+        else if (isMoving)
+        {
+            lawDisplayText.text = "Newton's 1st Law: Object in motion stays in motion (Inertia)";
+        }
+        else // Not applying force, not significantly moving
+        {
+            lawDisplayText.text = "Newton's 1st Law: Object at rest stays at rest (Inertia)";
+        }
     }
 }
