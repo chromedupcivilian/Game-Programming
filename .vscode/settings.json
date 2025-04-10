@@ -1,0 +1,5 @@
+{
+    "editor.suggestOnTriggerCharacters": false,
+    "editor.acceptSuggestionOnEnter": "smart",
+    "editor.acceptSuggestionOnCommitCharacter": false
+}
